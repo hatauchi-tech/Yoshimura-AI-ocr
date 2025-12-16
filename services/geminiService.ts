@@ -69,19 +69,7 @@ export const analyzeDocument = async (
     },
     config: {
       systemInstruction: systemInstruction,
-      responseMimeType: "application/json",
-      // Flexible schema to allow varying template structures
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          templateId: { type: Type.STRING },
-          data: { 
-            type: Type.OBJECT,
-            description: "抽出されたデータ。TABLE型はJSON配列として格納すること。"
-          }
-        },
-        required: ["templateId", "data"]
-      }
+      responseMimeType: "application/json"
     }
   });
 

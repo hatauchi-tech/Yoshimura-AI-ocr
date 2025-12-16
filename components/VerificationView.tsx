@@ -14,6 +14,7 @@ const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, temp
   const [zoom, setZoom] = useState(1);
   
   const template = templates.find(t => t.id === doc.templateId);
+  const isPdf = doc.file.type === 'application/pdf';
 
   useEffect(() => {
     if (doc.data) {
@@ -151,20 +152,45 @@ const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, temp
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Image Viewer */}
+        {/* Left: Document Viewer */}
         <div className="flex-1 bg-slate-900 relative overflow-hidden flex flex-col">
-          <div className="absolute top-4 left-4 z-10 bg-black/50 backdrop-blur rounded-lg flex space-x-2 p-1">
-            <button onClick={() => setZoom(Math.max(0.5, zoom - 0.25))} className="p-2 text-white hover:bg-white/20 rounded">-</button>
-            <span className="p-2 text-white text-sm font-mono">{Math.round(zoom * 100)}%</span>
-            <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 text-white hover:bg-white/20 rounded">+</button>
-          </div>
-          <div className="flex-1 overflow-auto p-8 flex items-start justify-center">
-            <img 
-              src={doc.previewUrl} 
-              alt="Document" 
-              style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
-              className="shadow-2xl transition-transform duration-200 max-w-none"
-            />
+          {/* Zoom Controls - Show only for images as PDF viewers usually have their own controls */}
+          {!isPdf && (
+            <div className="absolute top-4 left-4 z-10 bg-black/50 backdrop-blur rounded-lg flex space-x-2 p-1">
+              <button onClick={() => setZoom(Math.max(0.5, zoom - 0.25))} className="p-2 text-white hover:bg-white/20 rounded">-</button>
+              <span className="p-2 text-white text-sm font-mono">{Math.round(zoom * 100)}%</span>
+              <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 text-white hover:bg-white/20 rounded">+</button>
+            </div>
+          )}
+          
+          <div className={`flex-1 overflow-auto flex items-start justify-center ${isPdf ? 'p-0' : 'p-8'}`}>
+            {isPdf ? (
+              <object 
+                data={doc.previewUrl} 
+                type="application/pdf"
+                className="w-full h-full block"
+              >
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-4 text-center">
+                  <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  <p className="mb-2">PDFプレビューが表示されない場合</p>
+                  <a 
+                    href={doc.previewUrl} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    className="text-blue-400 hover:text-blue-300 underline"
+                  >
+                    新しいタブでPDFを開く
+                  </a>
+                </div>
+              </object>
+            ) : (
+              <img 
+                src={doc.previewUrl} 
+                alt="Document" 
+                style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+                className="shadow-2xl transition-transform duration-200 max-w-none"
+              />
+            )}
           </div>
         </div>
 
