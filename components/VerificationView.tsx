@@ -9,12 +9,29 @@ interface VerificationViewProps {
   onBack: () => void;
 }
 
+// Helper to extract value regardless of whether it's raw or { value, box_2d }
+const getValue = (data: any): string | number => {
+  if (data === null || data === undefined) return '';
+  if (typeof data === 'object' && 'value' in data) {
+    return data.value;
+  }
+  return data;
+};
+
+// Helper to extract box_2d
+const getBox = (data: any): number[] | null => {
+  if (data && typeof data === 'object' && Array.isArray(data.box_2d)) {
+    return data.box_2d;
+  }
+  return null;
+};
+
 const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, templates, onUpdate, onConfirm, onBack }) => {
   const [formData, setFormData] = useState<ExtractedData>(doc.data || {});
   const [zoom, setZoom] = useState(1);
+  const [activeBox, setActiveBox] = useState<number[] | null>(null);
   
   const template = templates.find(t => t.id === doc.templateId);
-  const isPdf = doc.file.type === 'application/pdf';
 
   useEffect(() => {
     if (doc.data) {
@@ -22,51 +39,76 @@ const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, temp
     }
   }, [doc.data]);
 
-  const handleChange = (key: string, value: any) => {
-    const newData = { ...formData, [key]: value };
+  const handleChange = (key: string, newValue: any) => {
+    // Preserve box_2d if it exists
+    const current = formData[key];
+    let updatePayload = newValue;
+    
+    if (current && typeof current === 'object' && 'value' in current) {
+      updatePayload = { ...current, value: newValue };
+    }
+
+    const newData = { ...formData, [key]: updatePayload };
     setFormData(newData);
-    onUpdate(doc.id, newData); // Sync to parent state
+    onUpdate(doc.id, newData); 
   };
 
-  const handleTableChange = (tableKey: string, rowIndex: number, colKey: string, value: any) => {
+  const handleTableChange = (tableKey: string, rowIndex: number, colKey: string, newValue: any) => {
     const currentTable = (formData[tableKey] as any[]) || [];
     const newTable = [...currentTable];
-    if (!newTable[rowIndex]) newTable[rowIndex] = {};
-    newTable[rowIndex] = { ...newTable[rowIndex], [colKey]: value };
     
-    handleChange(tableKey, newTable);
+    if (!newTable[rowIndex]) newTable[rowIndex] = {};
+    
+    const currentCell = newTable[rowIndex][colKey];
+    let updatePayload = newValue;
+
+    if (currentCell && typeof currentCell === 'object' && 'value' in currentCell) {
+        updatePayload = { ...currentCell, value: newValue };
+    }
+
+    newTable[rowIndex] = { ...newTable[rowIndex], [colKey]: updatePayload };
+    
+    const newData = { ...formData, [tableKey]: newTable };
+    setFormData(newData);
+    onUpdate(doc.id, newData);
   };
 
   const handleAddRow = (tableKey: string) => {
     const currentTable = (formData[tableKey] as any[]) || [];
-    handleChange(tableKey, [...currentTable, {}]);
+    const newData = { ...formData, [tableKey]: [...currentTable, {}] };
+    setFormData(newData);
+    onUpdate(doc.id, newData);
   };
 
   const handleRemoveRow = (tableKey: string, rowIndex: number) => {
     const currentTable = (formData[tableKey] as any[]) || [];
     const newTable = currentTable.filter((_, idx) => idx !== rowIndex);
-    handleChange(tableKey, newTable);
+    const newData = { ...formData, [tableKey]: newTable };
+    setFormData(newData);
+    onUpdate(doc.id, newData);
   };
 
-  // Advanced CSV generation handling nested tables
+  const handleFocus = (data: any) => {
+    const box = getBox(data);
+    setActiveBox(box);
+  };
+
+  const handleBlur = () => {
+    setActiveBox(null);
+  };
+
   const handleDownloadCSV = () => {
      if (!template) return;
      
-     // Detect if we have any table fields
      const tableFields = template.fields.filter(f => f.type === FieldType.TABLE);
      const scalarFields = template.fields.filter(f => f.type !== FieldType.TABLE);
 
      let csvRows: string[] = [];
      
-     // Construct Header
-     // Strategy: If there's a table, we flatten the CSV: Scalar Columns + Table Columns
-     // If multiple tables, we might just take the first one or this gets complex. Assuming single main detail table for now.
-     
      const headerLabels = scalarFields.map(f => f.label);
      let tableColumns: any[] = [];
      
      if (tableFields.length > 0) {
-       // Use the first table for the main flattened structure
        const mainTable = tableFields[0];
        if (mainTable.columns) {
          tableColumns = mainTable.columns;
@@ -76,40 +118,34 @@ const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, temp
      
      csvRows.push(headerLabels.join(','));
 
-     // Construct Body
      if (tableFields.length > 0) {
         const mainTableKey = tableFields[0].key;
-        const rows = (formData[mainTableKey] as any[]) || [{}]; // At least one row if empty
+        const rows = (formData[mainTableKey] as any[]) || [{}]; 
         
         rows.forEach(row => {
           const rowData: string[] = [];
           
-          // Add scalar data (repeated for each line item)
           scalarFields.forEach(f => {
-            let val = formData[f.key];
-            if (val === undefined || val === null) val = '';
+            let val = getValue(formData[f.key]);
             rowData.push(`"${String(val).replace(/"/g, '""')}"`);
           });
           
-          // Add table column data
           tableColumns.forEach(c => {
-             let val = row[c.key];
-             if (val === undefined || val === null) val = '';
+             let val = getValue(row[c.key]);
              rowData.push(`"${String(val).replace(/"/g, '""')}"`);
           });
           
           csvRows.push(rowData.join(','));
         });
      } else {
-        // Simple scalar row
         const rowData = scalarFields.map(f => {
-          let val = formData[f.key];
+          let val = getValue(formData[f.key]);
           return `"${val !== undefined && val !== null ? String(val).replace(/"/g, '""') : ''}"`;
         });
         csvRows.push(rowData.join(','));
      }
      
-     const csvContent = "\uFEFF" + csvRows.join("\n"); // Add BOM for Excel compatibility
+     const csvContent = "\uFEFF" + csvRows.join("\n");
      const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
      const link = document.createElement("a");
      link.setAttribute("href", encodedUri);
@@ -152,50 +188,44 @@ const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, temp
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Document Viewer */}
-        <div className="flex-1 bg-slate-900 relative overflow-hidden flex flex-col">
-          {/* Zoom Controls - Show only for images as PDF viewers usually have their own controls */}
-          {!isPdf && (
-            <div className="absolute top-4 left-4 z-10 bg-black/50 backdrop-blur rounded-lg flex space-x-2 p-1">
-              <button onClick={() => setZoom(Math.max(0.5, zoom - 0.25))} className="p-2 text-white hover:bg-white/20 rounded">-</button>
-              <span className="p-2 text-white text-sm font-mono">{Math.round(zoom * 100)}%</span>
-              <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 text-white hover:bg-white/20 rounded">+</button>
-            </div>
-          )}
+        {/* Left: Document Viewer (50% Width) */}
+        <div className="w-1/2 bg-slate-900 relative overflow-hidden flex flex-col border-r border-slate-700">
+          {/* Zoom Controls */}
+          <div className="absolute top-4 left-4 z-10 bg-black/50 backdrop-blur rounded-lg flex space-x-2 p-1">
+            <button onClick={() => setZoom(Math.max(0.5, zoom - 0.25))} className="p-2 text-white hover:bg-white/20 rounded">-</button>
+            <span className="p-2 text-white text-sm font-mono">{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 text-white hover:bg-white/20 rounded">+</button>
+          </div>
           
-          <div className={`flex-1 overflow-auto flex items-start justify-center ${isPdf ? 'p-0' : 'p-8'}`}>
-            {isPdf ? (
-              <object 
-                data={doc.previewUrl} 
-                type="application/pdf"
-                className="w-full h-full block"
-              >
-                <div className="flex flex-col items-center justify-center h-full text-slate-400 p-4 text-center">
-                  <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                  <p className="mb-2">PDFプレビューが表示されない場合</p>
-                  <a 
-                    href={doc.previewUrl} 
-                    target="_blank" 
-                    rel="noreferrer" 
-                    className="text-blue-400 hover:text-blue-300 underline"
-                  >
-                    新しいタブでPDFを開く
-                  </a>
-                </div>
-              </object>
-            ) : (
+          <div className="flex-1 overflow-auto flex items-start justify-center p-8">
+            <div 
+              className="relative shadow-2xl transition-transform duration-200 max-w-none"
+              style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+            >
               <img 
                 src={doc.previewUrl} 
                 alt="Document" 
-                style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
-                className="shadow-2xl transition-transform duration-200 max-w-none"
+                className="block"
               />
-            )}
+              {/* Highlight Overlay */}
+              {activeBox && (
+                <div 
+                  className="absolute border-2 border-red-500 bg-red-500/20 pointer-events-none transition-all duration-200"
+                  style={{
+                    top: `${activeBox[0] / 10}%`,
+                    left: `${activeBox[1] / 10}%`,
+                    height: `${(activeBox[2] - activeBox[0]) / 10}%`,
+                    width: `${(activeBox[3] - activeBox[1]) / 10}%`,
+                    zIndex: 20
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Right: Data Form */}
-        <div className="w-[600px] bg-white border-l border-slate-200 overflow-y-auto custom-scrollbar p-6 shadow-xl z-10">
+        {/* Right: Data Form (50% Width) */}
+        <div className="w-1/2 bg-white border-l border-slate-200 overflow-y-auto custom-scrollbar p-6 shadow-xl z-10">
           <h3 className="text-lg font-bold text-slate-800 mb-6 border-b pb-2">抽出データ</h3>
           
           {!template ? (
@@ -205,21 +235,26 @@ const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, temp
           ) : (
              <div className="space-y-6">
                {/* Render Scalar Fields First */}
-               {template.fields.filter(f => f.type !== FieldType.TABLE).map((field) => (
-                 <div key={field.key} className="group">
-                    <label className="block text-sm font-medium text-slate-700 mb-1 flex justify-between">
-                      {field.label}
-                      <span className="text-xs text-slate-400 font-normal">{field.type}</span>
-                    </label>
-                    <input
-                      type={field.type === 'NUMBER' ? 'number' : field.type === 'DATE' ? 'date' : 'text'}
-                      value={formData[field.key]?.toString() || ''}
-                      onChange={(e) => handleChange(field.key, e.target.value)}
-                      className="w-full bg-white text-slate-900 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow outline-none"
-                      placeholder={field.description}
-                    />
-                 </div>
-               ))}
+               {template.fields.filter(f => f.type !== FieldType.TABLE).map((field) => {
+                 const fieldData = formData[field.key];
+                 return (
+                   <div key={field.key} className="group">
+                      <label className="block text-sm font-medium text-slate-700 mb-1 flex justify-between">
+                        {field.label}
+                        <span className="text-xs text-slate-400 font-normal">{field.type}</span>
+                      </label>
+                      <input
+                        type={field.type === 'NUMBER' ? 'number' : field.type === 'DATE' ? 'date' : 'text'}
+                        value={getValue(fieldData).toString()}
+                        onChange={(e) => handleChange(field.key, e.target.value)}
+                        onFocus={() => handleFocus(fieldData)}
+                        onBlur={handleBlur}
+                        className="w-full bg-white text-slate-900 border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow outline-none"
+                        placeholder={field.description}
+                      />
+                   </div>
+                 );
+               })}
 
                {/* Render Table Fields */}
                {template.fields.filter(f => f.type === FieldType.TABLE).map((field) => {
@@ -252,16 +287,21 @@ const VerificationView: React.FC<VerificationViewProps> = ({ document: doc, temp
                                <td className="px-2 py-2 text-center">
                                  <button onClick={() => handleRemoveRow(field.key, rowIndex)} className="text-red-300 hover:text-red-500">×</button>
                                </td>
-                               {field.columns?.map(col => (
-                                 <td key={col.key} className="px-2 py-2">
-                                   <input 
-                                     className="w-full text-sm border-0 border-b border-transparent focus:border-indigo-500 focus:ring-0 px-1 py-1 bg-transparent text-slate-900 hover:bg-slate-50"
-                                     value={row[col.key] || ''}
-                                     onChange={(e) => handleTableChange(field.key, rowIndex, col.key, e.target.value)}
-                                     type={col.type === 'NUMBER' ? 'number' : 'text'}
-                                   />
-                                 </td>
-                               ))}
+                               {field.columns?.map(col => {
+                                 const cellData = row[col.key];
+                                 return (
+                                   <td key={col.key} className="px-2 py-2">
+                                     <input 
+                                       className="w-full text-sm border-0 border-b border-transparent focus:border-indigo-500 focus:ring-0 px-1 py-1 bg-transparent text-slate-900 hover:bg-slate-50"
+                                       value={getValue(cellData).toString()}
+                                       onChange={(e) => handleTableChange(field.key, rowIndex, col.key, e.target.value)}
+                                       onFocus={() => handleFocus(cellData)}
+                                       onBlur={handleBlur}
+                                       type={col.type === 'NUMBER' ? 'number' : 'text'}
+                                     />
+                                   </td>
+                                 );
+                               })}
                              </tr>
                            ))}
                          </tbody>

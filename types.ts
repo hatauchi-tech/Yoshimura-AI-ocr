@@ -39,7 +39,6 @@ export interface ProcessedDocument {
 
 export enum AppTab {
   DASHBOARD = 'DASHBOARD',
-  TEMPLATES = 'TEMPLATES',
   INSTRUCTIONS = 'INSTRUCTIONS'
 }
 

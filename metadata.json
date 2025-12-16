@@ -1,5 +1,5 @@
 {
-  "name": "汎用AI-OCR",
-  "description": "Gemini 3.0 を活用した汎用 AI-OCR システム。あらゆる帳票の自動識別、明細行を含む構造化データ抽出、CSV出力を実現。",
+  "name": "AI-OCRアプリ",
+  "description": "Gemini 3.0 を活用したAI-OCRシステム。帳票の自動識別、明細行を含む構造化データ抽出、統合CSV出力を実現。",
   "requestFramePermissions": []
 }

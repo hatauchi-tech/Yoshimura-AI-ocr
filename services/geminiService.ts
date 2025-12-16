@@ -41,22 +41,48 @@ export const analyzeDocument = async (
       return `- ${f.key} (${f.type}): ${f.description}`;
     }).join('\n');
 
-    return `ID: ${t.id}\nテンプレート名: ${t.name}\n説明: ${t.description}\nフィールド定義:\n${fieldDescs}`;
+    return `ID: ${t.id}\nテンプレート名: ${t.name}\n特徴・説明: ${t.description}\nフィールド定義:\n${fieldDescs}`;
   }).join('\n---\n');
 
   const systemInstruction = `
-    あなたは高度な汎用AI-OCRです。
-    提供された画像を分析し、最もマッチするテンプレートを選択して、構造化データを抽出してください。
+    あなたは帳票処理の専門AIです。
+    提供された画像を分析し、以下のステップで処理を実行してください。
+
+    ステップ1: テンプレート識別
+    画像の「タイトル」や「レイアウト」を注意深く分析し、提供されたテンプレート定義の中で最も適切なものを1つ選んでください。
+    特に「注文書」「発注書」「出荷依頼書」「直送仕入商品発注票」などのタイトル文字を優先して識別してください。
+    最も一致するテンプレートのIDを "templateId" として出力してください。
+    もしどれも一致しない場合は "unknown" としてください。
+
+    ステップ2: データ抽出
+    選択したテンプレートのフィールド定義に基づいて、データを抽出してください。
     
-    【重要：明細データの抽出について】
-    フィールドタイプが "TABLE" の場合、そのフィールドは「オブジェクトの配列」として抽出してください。
-    表の各行を配列の1要素とし、各列をオブジェクトのプロパティとしてマッピングしてください。
-    明細行が複数ある場合は、漏れなくすべて抽出してください。
+    【重要：日付形式 (STRING型として抽出)】
+    フィールドの説明に「yyyyMMdd形式」とある場合は、画像内の日付（例：「R5.10.1」「2023/10/01」「10月1日」など）を必ず "yyyyMMdd" 形式の半角数字文字列（例: "20231001"）に変換して抽出してください。
     
-    テンプレート一覧:
+    【重要：データ出力形式】
+    すべての抽出フィールドについて、以下のJSON形式で出力してください。
+    位置情報（box_2d）も含めてください。
+    
+    {
+      "templateId": "選択したテンプレートID",
+      "data": {
+        "key_name": {
+          "value": (抽出された値),
+          "box_2d": [ymin, xmin, ymax, xmax] (正規化座標 0-1000)
+        },
+        ...
+        "table_key": [
+           { 
+             "col_key": { "value": "...", "box_2d": [...] },
+             ...
+           }
+        ]
+      }
+    }
+
+    テンプレート定義一覧:
     ${templateDescriptions}
-    
-    どのテンプレートも明確に一致しない場合は、templateIdを "unknown" としてください。
   `;
 
   const response = await ai.models.generateContent({
@@ -64,7 +90,7 @@ export const analyzeDocument = async (
     contents: {
       parts: [
         { inlineData: { mimeType: file.type, data: base64Data } },
-        { text: "この帳票を解析し、JSONデータを出力してください。" }
+        { text: "この帳票を解析し、指定されたJSON形式で結果を出力してください。" }
       ]
     },
     config: {
@@ -119,8 +145,6 @@ export const editImageWithPrompt = async (file: File, prompt: string): Promise<s
 // Image Generation (Nano Banana Pro / Gemini 3.0 Pro Image Preview)
 // ------------------------------------
 export const generateImageWithPrompt = async (prompt: string, size: ImageSize): Promise<string> => {
-  // Key selection check for paid model (Veo/Imagen/Pro Image)
-  // Check global aistudio object for key selection status
   if (typeof window !== 'undefined' && (window as any).aistudio && (window as any).aistudio.hasSelectedApiKey) {
     const hasKey = await (window as any).aistudio.hasSelectedApiKey();
     if (!hasKey) {
@@ -128,7 +152,6 @@ export const generateImageWithPrompt = async (prompt: string, size: ImageSize): 
     }
   }
 
-  // Use a new instance to ensure the selected key is used
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const response = await ai.models.generateContent({
@@ -139,7 +162,7 @@ export const generateImageWithPrompt = async (prompt: string, size: ImageSize): 
     config: {
       imageConfig: {
         imageSize: size,
-        aspectRatio: '1:1' // Defaulting to 1:1 since UI doesn't provide ratio
+        aspectRatio: '1:1'
       }
     }
   });
